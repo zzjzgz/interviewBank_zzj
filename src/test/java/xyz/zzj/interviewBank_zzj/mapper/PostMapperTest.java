@@ -1,6 +1,5 @@
 package xyz.zzj.interviewBank_zzj.mapper;
 
-import xyz.zzj.interviewBank_zzj.model.entity.Post;
 import java.util.Date;
 import java.util.List;
 import javax.annotation.Resource;

@@ -2,7 +2,6 @@ package xyz.zzj.interviewBank_zzj.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import xyz.zzj.interviewBank_zzj.model.entity.Post;
 import xyz.zzj.interviewBank_zzj.model.entity.User;
 import javax.annotation.Resource;
 import org.junit.jupiter.api.Assertions;
