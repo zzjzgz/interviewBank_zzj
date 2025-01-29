@@ -1,6 +1,8 @@
 package xyz.zzj.interviewBank_zzj.model.vo;
 
 import cn.hutool.json.JSONUtil;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import xyz.zzj.interviewBank_zzj.model.entity.Question;
 import xyz.zzj.interviewBank_zzj.model.entity.QuestionBank;
 import lombok.Data;
 import org.springframework.beans.BeanUtils;
@@ -37,7 +39,10 @@ public class QuestionBankVO implements Serializable {
      */
     private String picture;
 
-
+    /**
+     * 题库中的题目列表
+     */
+    Page<Question> questionPage;
     /**
      * 创建用户 id
      */

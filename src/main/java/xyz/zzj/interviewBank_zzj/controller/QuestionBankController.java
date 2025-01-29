@@ -9,14 +9,14 @@ import xyz.zzj.interviewBank_zzj.common.ResultUtils;
 import xyz.zzj.interviewBank_zzj.constant.UserConstant;
 import xyz.zzj.interviewBank_zzj.exception.BusinessException;
 import xyz.zzj.interviewBank_zzj.exception.ThrowUtils;
-import xyz.zzj.interviewBank_zzj.model.dto.questionBank.QuestionBankAddRequest;
-import xyz.zzj.interviewBank_zzj.model.dto.questionBank.QuestionBankEditRequest;
-import xyz.zzj.interviewBank_zzj.model.dto.questionBank.QuestionBankQueryRequest;
-import xyz.zzj.interviewBank_zzj.model.dto.questionBank.QuestionBankUpdateRequest;
+import xyz.zzj.interviewBank_zzj.model.dto.question.QuestionQueryRequest;
+import xyz.zzj.interviewBank_zzj.model.dto.questionBank.*;
+import xyz.zzj.interviewBank_zzj.model.entity.Question;
 import xyz.zzj.interviewBank_zzj.model.entity.QuestionBank;
 import xyz.zzj.interviewBank_zzj.model.entity.User;
 import xyz.zzj.interviewBank_zzj.model.vo.QuestionBankVO;
 import xyz.zzj.interviewBank_zzj.service.QuestionBankService;
+import xyz.zzj.interviewBank_zzj.service.QuestionService;
 import xyz.zzj.interviewBank_zzj.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -39,6 +39,9 @@ public class QuestionBankController {
     private QuestionBankService questionBankService;
 
     @Resource
+    private QuestionService questionService;
+
+    @Resource
     private UserService userService;
 
     // region 增删改查
@@ -51,6 +54,7 @@ public class QuestionBankController {
      * @return
      */
     @PostMapping("/add")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Long> addQuestionBank(@RequestBody QuestionBankAddRequest questionBankAddRequest, HttpServletRequest request) {
         ThrowUtils.throwIf(questionBankAddRequest == null, ErrorCode.PARAMS_ERROR);
         // todo 在此处将实体类和 DTO 进行转换
@@ -77,6 +81,7 @@ public class QuestionBankController {
      * @return
      */
     @PostMapping("/delete")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> deleteQuestionBank(@RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
         if (deleteRequest == null || deleteRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -126,17 +131,33 @@ public class QuestionBankController {
     /**
      * 根据 id 获取题库（封装类）
      *
-     * @param id
+     * @param questionBankGetVoRequest
      * @return
      */
     @GetMapping("/get/vo")
-    public BaseResponse<QuestionBankVO> getQuestionBankVOById(long id, HttpServletRequest request) {
+    public BaseResponse<QuestionBankVO> getQuestionBankVOById(QuestionBankGetVoRequest questionBankGetVoRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(questionBankGetVoRequest == null, ErrorCode.PARAMS_ERROR);
+        Long id = questionBankGetVoRequest.getId();
+        Boolean needQuestionFlag= questionBankGetVoRequest.getNeedQuestionList();
+        if (needQuestionFlag == null){
+            needQuestionFlag = false;
+        }
         ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
         // 查询数据库
         QuestionBank questionBank = questionBankService.getById(id);
         ThrowUtils.throwIf(questionBank == null, ErrorCode.NOT_FOUND_ERROR);
+        //是否要关联查询题目列表
+        QuestionBankVO questionBankVO = questionBankService.getQuestionBankVO(questionBank, request);
+        //查询题目列表
+        if (needQuestionFlag){
+            QuestionQueryRequest questionQueryRequest = new QuestionQueryRequest();
+            questionQueryRequest.setQuestionBankId(id);
+            Page<Question> questionPage = questionService.listQuestionByPage(questionQueryRequest);
+            // 封装到VO中
+            questionBankVO.setQuestionPage(questionPage);
+        }
         // 获取封装类
-        return ResultUtils.success(questionBankService.getQuestionBankVO(questionBank, request));
+        return ResultUtils.success(questionBankVO);
     }
 
     /**

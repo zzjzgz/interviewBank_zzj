@@ -47,6 +47,7 @@ public class QuestionBankQueryRequest extends PageRequest implements Serializabl
      */
     private String picture;
 
+
     /**
      * 创建用户 id
      */

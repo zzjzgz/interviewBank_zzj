@@ -1,5 +1,8 @@
 package xyz.zzj.interviewBank_zzj.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import xyz.zzj.interviewBank_zzj.annotation.AuthCheck;
 import xyz.zzj.interviewBank_zzj.common.BaseResponse;
@@ -11,6 +14,7 @@ import xyz.zzj.interviewBank_zzj.exception.BusinessException;
 import xyz.zzj.interviewBank_zzj.exception.ThrowUtils;
 import xyz.zzj.interviewBank_zzj.model.dto.questionBankQuestion.QuestionBankQuestionAddRequest;
 import xyz.zzj.interviewBank_zzj.model.dto.questionBankQuestion.QuestionBankQuestionQueryRequest;
+import xyz.zzj.interviewBank_zzj.model.dto.questionBankQuestion.QuestionBankQuestionRemoveRequest;
 import xyz.zzj.interviewBank_zzj.model.dto.questionBankQuestion.QuestionBankQuestionUpdateRequest;
 import xyz.zzj.interviewBank_zzj.model.entity.QuestionBankQuestion;
 import xyz.zzj.interviewBank_zzj.model.entity.User;
@@ -50,6 +54,7 @@ public class QuestionBankQuestionController {
      * @return
      */
     @PostMapping("/add")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Long> addQuestionBankQuestion(@RequestBody QuestionBankQuestionAddRequest questionBankQuestionAddRequest, HttpServletRequest request) {
         ThrowUtils.throwIf(questionBankQuestionAddRequest == null, ErrorCode.PARAMS_ERROR);
         // todo 在此处将实体类和 DTO 进行转换
@@ -57,7 +62,6 @@ public class QuestionBankQuestionController {
         BeanUtils.copyProperties(questionBankQuestionAddRequest, questionBankQuestion);
         // 数据校验
         questionBankQuestionService.validQuestionBankQuestion(questionBankQuestion, true);
-        // todo 填充默认值
         User loginUser = userService.getLoginUser(request);
         questionBankQuestion.setUserId(loginUser.getId());
         // 写入数据库
@@ -76,6 +80,7 @@ public class QuestionBankQuestionController {
      * @return
      */
     @PostMapping("/delete")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> deleteQuestionBankQuestion(@RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
         if (deleteRequest == null || deleteRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -201,37 +206,34 @@ public class QuestionBankQuestionController {
         return ResultUtils.success(questionBankQuestionService.getQuestionBankQuestionVOPage(questionBankQuestionPage, request));
     }
 
+
     /**
-     * 编辑题库题目关联（给用户使用）
+     * 移除题库题目关联（管理员和本人可用）
      *
-     * @param questionBankQuestionEditRequest
+     * @param removeRequest
      * @param request
      * @return
      */
-    @PostMapping("/edit")
-    public BaseResponse<Boolean> editQuestionBankQuestion(@RequestBody QuestionBankQuestionEditRequest questionBankQuestionEditRequest, HttpServletRequest request) {
-        if (questionBankQuestionEditRequest == null || questionBankQuestionEditRequest.getId() <= 0) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR);
-        }
-        // todo 在此处将实体类和 DTO 进行转换
-        QuestionBankQuestion questionBankQuestion = new QuestionBankQuestion();
-        BeanUtils.copyProperties(questionBankQuestionEditRequest, questionBankQuestion);
-        // 数据校验
-        questionBankQuestionService.validQuestionBankQuestion(questionBankQuestion, false);
+    @PostMapping("/remove")
+    public BaseResponse<Boolean> removeQuestionBankQuestion(@RequestBody QuestionBankQuestionRemoveRequest removeRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(removeRequest == null, ErrorCode.PARAMS_ERROR);
+        //取出参数
+        long questionId = removeRequest.getQuestionId();
+        Long questionBankId = removeRequest.getQuestionBankId();
+        ThrowUtils.throwIf(questionId <= 0 || questionBankId <= 0, ErrorCode.PARAMS_ERROR);
+        // 判断题库题目关联信息是否存在
+        LambdaQueryWrapper<QuestionBankQuestion> lambdaQueryWrapper = Wrappers.lambdaQuery(QuestionBankQuestion.class)
+                .eq(QuestionBankQuestion::getQuestionId, questionId)
+                .eq(QuestionBankQuestion::getQuestionBankId, questionBankId);
+        QuestionBankQuestion questionBankQuestion = questionBankQuestionService.getOne(lambdaQueryWrapper);
+        ThrowUtils.throwIf(questionBankQuestion == null, ErrorCode.NOT_FOUND_ERROR);
+        // 仅本人或管理员可删除
         User loginUser = userService.getLoginUser(request);
-        // 判断是否存在
-        long id = questionBankQuestionEditRequest.getId();
-        QuestionBankQuestion oldQuestionBankQuestion = questionBankQuestionService.getById(id);
-        ThrowUtils.throwIf(oldQuestionBankQuestion == null, ErrorCode.NOT_FOUND_ERROR);
-        // 仅本人或管理员可编辑
-        if (!oldQuestionBankQuestion.getUserId().equals(loginUser.getId()) && !userService.isAdmin(loginUser)) {
-            throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
-        }
+        ThrowUtils.throwIf(!loginUser.getId().equals(questionBankQuestion.getUserId()) && !userService.isAdmin(request), ErrorCode.NO_AUTH_ERROR);
         // 操作数据库
-        boolean result = questionBankQuestionService.updateById(questionBankQuestion);
+        boolean result = questionBankQuestionService.remove(lambdaQueryWrapper);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(true);
     }
-
     // endregion
 }
