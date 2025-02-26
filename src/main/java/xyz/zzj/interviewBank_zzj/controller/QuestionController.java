@@ -1,6 +1,13 @@
 package xyz.zzj.interviewBank_zzj.controller;
 
+import cn.dev33.satoken.annotation.SaCheckRole;
 import cn.hutool.json.JSONUtil;
+import com.alibaba.csp.sentinel.Entry;
+import com.alibaba.csp.sentinel.EntryType;
+import com.alibaba.csp.sentinel.SphU;
+import com.alibaba.csp.sentinel.Tracer;
+import com.alibaba.csp.sentinel.slots.block.BlockException;
+import com.alibaba.csp.sentinel.slots.block.degrade.DegradeException;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import xyz.zzj.interviewBank_zzj.annotation.AuthCheck;
 import xyz.zzj.interviewBank_zzj.common.BaseResponse;
@@ -14,8 +21,10 @@ import xyz.zzj.interviewBank_zzj.model.dto.question.QuestionAddRequest;
 import xyz.zzj.interviewBank_zzj.model.dto.question.QuestionEditRequest;
 import xyz.zzj.interviewBank_zzj.model.dto.question.QuestionQueryRequest;
 import xyz.zzj.interviewBank_zzj.model.dto.question.QuestionUpdateRequest;
+import xyz.zzj.interviewBank_zzj.model.dto.questionBank.QuestionBankQueryRequest;
 import xyz.zzj.interviewBank_zzj.model.entity.Question;
 import xyz.zzj.interviewBank_zzj.model.entity.User;
+import xyz.zzj.interviewBank_zzj.model.vo.QuestionBankVO;
 import xyz.zzj.interviewBank_zzj.model.vo.QuestionVO;
 import xyz.zzj.interviewBank_zzj.service.QuestionService;
 import xyz.zzj.interviewBank_zzj.service.UserService;
@@ -26,6 +35,8 @@ import org.springframework.web.bind.annotation.*;
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import java.util.List;
+
+import static xyz.zzj.interviewBank_zzj.constant.SentinelConstant.listQuestionVOByPage;
 
 /**
  * 题目接口
@@ -53,7 +64,7 @@ public class QuestionController {
      * @return
      */
     @PostMapping("/add")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Long> addQuestion(@RequestBody QuestionAddRequest questionAddRequest, HttpServletRequest request) {
         ThrowUtils.throwIf(questionAddRequest == null, ErrorCode.PARAMS_ERROR);
         //将实体类和 DTO 进行转换
@@ -82,7 +93,7 @@ public class QuestionController {
      * @return
      */
     @PostMapping("/delete")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> deleteQuestion(@RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
         if (deleteRequest == null || deleteRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -109,7 +120,7 @@ public class QuestionController {
      * @return
      */
     @PostMapping("/update")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> updateQuestion(@RequestBody QuestionUpdateRequest questionUpdateRequest) {
         if (questionUpdateRequest == null || questionUpdateRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -152,7 +163,7 @@ public class QuestionController {
      * @return
      */
     @PostMapping("/list/page")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Page<Question>> listQuestionByPage(@RequestBody QuestionQueryRequest questionQueryRequest) {
         ThrowUtils.throwIf(questionQueryRequest == null, ErrorCode.PARAMS_ERROR);
         // 查询数据库
@@ -174,12 +185,48 @@ public class QuestionController {
         long size = questionQueryRequest.getPageSize();
         // 限制爬虫，限制每页最多 20 条数据
         ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);
-        // 查询数据库
-        Page<Question> questionPage = questionService.page(new Page<>(current, size),
-                questionService.getQueryWrapper(questionQueryRequest));
-        // 获取封装类
-        return ResultUtils.success(questionService.getQuestionVOPage(questionPage, request));
+
+        //对ip进行限流
+        String ip = request.getRemoteAddr();
+        Entry entry = null;
+        try {
+            entry = SphU.entry(listQuestionVOByPage, EntryType.IN, 1, ip);
+            //被保护的用户
+            // 查询数据库
+            Page<Question> questionPage = questionService.page(new Page<>(current, size), questionService.getQueryWrapper(questionQueryRequest));
+            // 获取封装类
+            return ResultUtils.success(questionService.getQuestionVOPage(questionPage, request));
+        } catch (Throwable ex) {
+            // 处理业务异常
+            if (!BlockException.isBlockException(ex)){
+                Tracer.trace(ex);
+                return ResultUtils.error(ErrorCode.SYSTEM_ERROR, "系统错误");
+            }
+            if (ex instanceof DegradeException) {
+                // 降级操作
+                return handleFallback(questionQueryRequest, request, ex);
+            }
+            // 限流操作
+            return ResultUtils.error(ErrorCode.SYSTEM_ERROR, "访问过于频繁，情稍后再试");
+        } finally {
+            if (entry != null) {
+                entry.exit(1, ip);
+            }
+        }
+
     }
+
+    /**
+     * listQuestionBankVOByPage 降级操作：直接返回本地数据
+     * 处理的是业务本身的异常
+     */
+    public BaseResponse<Page<QuestionVO>> handleFallback(@RequestBody QuestionQueryRequest questionQueryRequest,
+                                                             HttpServletRequest request, Throwable ex) {
+        // 可以返回本地数据或空数据
+        return ResultUtils.success(null);
+    }
+
+
 
     /**
      * 分页获取当前登录用户创建的题目列表
@@ -238,6 +285,23 @@ public class QuestionController {
         boolean result = questionService.updateById(question);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(true);
+    }
+
+    /**
+     * 获取搜索结果（封装类）
+     *
+     * @param questionQueryRequest 搜索条件
+     * @param request             请求对象
+     * @return 搜索结果
+     */
+    @PostMapping("/search/page/vo")
+    public BaseResponse<Page<QuestionVO>> searchQuestionVOByPage(@RequestBody QuestionQueryRequest questionQueryRequest,
+                                                                 HttpServletRequest request) {
+        long size = questionQueryRequest.getPageSize();
+        // 限制爬虫
+        ThrowUtils.throwIf(size > 500, ErrorCode.PARAMS_ERROR);
+        Page<Question> questionPage = questionService.searchFromEs(questionQueryRequest);
+        return ResultUtils.success(questionService.getQuestionVOPage(questionPage, request));
     }
 
     // endregion

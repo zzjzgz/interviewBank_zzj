@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="xyz.zzj.interviewBank_zzj.mapper.UserSignMapper">
+
+    <resultMap id="BaseResultMap" type="xyz.zzj.interviewBank_zzj.model.entity.UserSign">
+            <id property="id" column="id" jdbcType="INTEGER"/>
+            <result property="userId" column="userId" jdbcType="BIGINT"/>
+            <result property="signDay" column="signDay" jdbcType="INTEGER"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,userId,signDay
+    </sql>
+</mapper>

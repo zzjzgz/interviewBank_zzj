@@ -20,9 +20,6 @@ public class QuestionBankGetVoRequest implements Serializable {
      * 题库ID
      */
     private Long id;
-    /**
-     * 是否需要查询题目列表
-     */
-    private Boolean needQuestionList;
+
 
 }

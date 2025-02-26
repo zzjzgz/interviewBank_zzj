@@ -2,13 +2,14 @@ package xyz.zzj.interviewBank_zzj.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.IService;
+import me.chanjar.weixin.common.bean.WxOAuth2UserInfo;
 import xyz.zzj.interviewBank_zzj.model.dto.user.UserQueryRequest;
 import xyz.zzj.interviewBank_zzj.model.entity.User;
 import xyz.zzj.interviewBank_zzj.model.vo.LoginUserVO;
 import xyz.zzj.interviewBank_zzj.model.vo.UserVO;
-import java.util.List;
+
 import javax.servlet.http.HttpServletRequest;
-import me.chanjar.weixin.common.bean.WxOAuth2UserInfo;
+import java.util.List;
 
 /**
  * 用户服务
@@ -117,4 +118,20 @@ public interface UserService extends IService<User> {
      */
     QueryWrapper<User> getQueryWrapper(UserQueryRequest userQueryRequest);
 
+
+    /**
+     * 添加用户签到记录
+     * @param userId 用户id
+     * @return 是否成功
+     */
+    boolean addUserSign(long userId);
+
+    /**
+     * 获取用户某年的签到记录
+     *
+     * @param userId 用户id
+     * @param year   年份
+     * @return 签到记录
+     */
+    List<Integer> selectSignRecord(long userId, Integer year);
 }

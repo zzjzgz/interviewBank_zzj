@@ -1,11 +1,18 @@
 package xyz.zzj.interviewBank_zzj.controller;
 
+import cn.dev33.satoken.annotation.SaCheckRole;
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
+import com.alibaba.csp.sentinel.slots.block.BlockException;
+import com.alibaba.csp.sentinel.slots.block.degrade.DegradeException;
+import com.alibaba.csp.sentinel.slots.block.flow.FlowException;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.jd.platform.hotkey.client.callback.JdHotKeyStore;
 import xyz.zzj.interviewBank_zzj.annotation.AuthCheck;
 import xyz.zzj.interviewBank_zzj.common.BaseResponse;
 import xyz.zzj.interviewBank_zzj.common.DeleteRequest;
 import xyz.zzj.interviewBank_zzj.common.ErrorCode;
 import xyz.zzj.interviewBank_zzj.common.ResultUtils;
+import xyz.zzj.interviewBank_zzj.constant.HotKeyConstant;
 import xyz.zzj.interviewBank_zzj.constant.UserConstant;
 import xyz.zzj.interviewBank_zzj.exception.BusinessException;
 import xyz.zzj.interviewBank_zzj.exception.ThrowUtils;
@@ -24,6 +31,8 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
+
+import static xyz.zzj.interviewBank_zzj.constant.SentinelConstant.listQuestionBankVOByPage;
 
 /**
  * 题库接口
@@ -54,7 +63,7 @@ public class QuestionBankController {
      * @return
      */
     @PostMapping("/add")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Long> addQuestionBank(@RequestBody QuestionBankAddRequest questionBankAddRequest, HttpServletRequest request) {
         ThrowUtils.throwIf(questionBankAddRequest == null, ErrorCode.PARAMS_ERROR);
         // todo 在此处将实体类和 DTO 进行转换
@@ -81,7 +90,7 @@ public class QuestionBankController {
      * @return
      */
     @PostMapping("/delete")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> deleteQuestionBank(@RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
         if (deleteRequest == null || deleteRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -108,7 +117,7 @@ public class QuestionBankController {
      * @return
      */
     @PostMapping("/update")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> updateQuestionBank(@RequestBody QuestionBankUpdateRequest questionBankUpdateRequest) {
         if (questionBankUpdateRequest == null || questionBankUpdateRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -138,24 +147,37 @@ public class QuestionBankController {
     public BaseResponse<QuestionBankVO> getQuestionBankVOById(QuestionBankGetVoRequest questionBankGetVoRequest, HttpServletRequest request) {
         ThrowUtils.throwIf(questionBankGetVoRequest == null, ErrorCode.PARAMS_ERROR);
         Long id = questionBankGetVoRequest.getId();
-        Boolean needQuestionFlag= questionBankGetVoRequest.getNeedQuestionList();
-        if (needQuestionFlag == null){
-            needQuestionFlag = false;
-        }
         ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
+
+        //生成热key
+        String key = HotKeyConstant.HOT_KEY_PREFIX + id;
+        //判断是否存在缓存
+        if (JdHotKeyStore.isHotKey(key)) {
+            //注意是get，不是getValue。getValue会获取并上报，get是纯粹的本地获取
+            Object cacheQuestionBank = JdHotKeyStore.get(key);
+            //如果缓存中存在，则直接返回
+            if(cacheQuestionBank != null) {
+                return ResultUtils.success((QuestionBankVO) cacheQuestionBank);
+            }
+        }
+
         // 查询数据库
         QuestionBank questionBank = questionBankService.getById(id);
         ThrowUtils.throwIf(questionBank == null, ErrorCode.NOT_FOUND_ERROR);
         //是否要关联查询题目列表
         QuestionBankVO questionBankVO = questionBankService.getQuestionBankVO(questionBank, request);
         //查询题目列表
-        if (needQuestionFlag){
-            QuestionQueryRequest questionQueryRequest = new QuestionQueryRequest();
-            questionQueryRequest.setQuestionBankId(id);
-            Page<Question> questionPage = questionService.listQuestionByPage(questionQueryRequest);
-            // 封装到VO中
-            questionBankVO.setQuestionPage(questionPage);
-        }
+
+        QuestionQueryRequest questionQueryRequest = new QuestionQueryRequest();
+        questionQueryRequest.setQuestionBankId(id);
+        Page<Question> questionPage = questionService.listQuestionByPage(questionQueryRequest);
+        // 封装到VO中
+        questionBankVO.setQuestionPage(questionPage);
+
+
+        // 写入缓存,如果不是热key，则不写入缓存，是热key，则写入缓存
+        JdHotKeyStore.smartSet(key, questionBankVO);
+
         // 获取封装类
         return ResultUtils.success(questionBankVO);
     }
@@ -167,7 +189,7 @@ public class QuestionBankController {
      * @return
      */
     @PostMapping("/list/page")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Page<QuestionBank>> listQuestionBankByPage(@RequestBody QuestionBankQueryRequest questionBankQueryRequest) {
         long current = questionBankQueryRequest.getCurrent();
         long size = questionBankQueryRequest.getPageSize();
@@ -184,19 +206,53 @@ public class QuestionBankController {
      * @param request
      * @return
      */
+
+    @SentinelResource(value = listQuestionBankVOByPage,
+            blockHandler = "handleBlockException",
+            fallback = "handleFallback")
     @PostMapping("/list/page/vo")
     public BaseResponse<Page<QuestionBankVO>> listQuestionBankVOByPage(@RequestBody QuestionBankQueryRequest questionBankQueryRequest,
                                                                HttpServletRequest request) {
         long current = questionBankQueryRequest.getCurrent();
         long size = questionBankQueryRequest.getPageSize();
         // 限制爬虫
-        ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);
+//        ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);
         // 查询数据库
         Page<QuestionBank> questionBankPage = questionBankService.page(new Page<>(current, size),
                 questionBankService.getQueryWrapper(questionBankQueryRequest));
         // 获取封装类
         return ResultUtils.success(questionBankService.getQuestionBankVOPage(questionBankPage, request));
     }
+
+    /**
+     * listQuestionBankVOByPage 流控操作
+     * 限流：提示“系统压力过大，请耐心等待”
+     * 他会处理限流和熔断降级之后的操作
+     */
+    public BaseResponse<Page<QuestionBankVO>> handleBlockException(@RequestBody QuestionBankQueryRequest questionBankQueryRequest,
+                                                                   HttpServletRequest request, BlockException ex) {
+
+        if (ex instanceof DegradeException) {
+            // 降级操作
+            return handleFallback(questionBankQueryRequest, request, ex);
+        }
+
+        // 限流操作
+        return ResultUtils.error(ErrorCode.SYSTEM_ERROR, "系统压力过大，请耐心等待");
+    }
+
+    /**
+     * listQuestionBankVOByPage 降级操作：直接返回本地数据
+     * 处理的是业务本身的异常
+     */
+    public BaseResponse<Page<QuestionBankVO>> handleFallback(@RequestBody QuestionBankQueryRequest questionBankQueryRequest,
+                                                             HttpServletRequest request, Throwable ex) {
+        // 可以返回本地数据或空数据
+        return ResultUtils.success(null);
+    }
+
+
+
 
     /**
      * 分页获取当前登录用户创建的题库列表

@@ -1,5 +1,7 @@
 package xyz.zzj.interviewBank_zzj.controller;
 
+import cn.dev33.satoken.annotation.SaCheckRole;
+import cn.hutool.core.collection.CollUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
@@ -12,10 +14,7 @@ import xyz.zzj.interviewBank_zzj.common.ResultUtils;
 import xyz.zzj.interviewBank_zzj.constant.UserConstant;
 import xyz.zzj.interviewBank_zzj.exception.BusinessException;
 import xyz.zzj.interviewBank_zzj.exception.ThrowUtils;
-import xyz.zzj.interviewBank_zzj.model.dto.questionBankQuestion.QuestionBankQuestionAddRequest;
-import xyz.zzj.interviewBank_zzj.model.dto.questionBankQuestion.QuestionBankQuestionQueryRequest;
-import xyz.zzj.interviewBank_zzj.model.dto.questionBankQuestion.QuestionBankQuestionRemoveRequest;
-import xyz.zzj.interviewBank_zzj.model.dto.questionBankQuestion.QuestionBankQuestionUpdateRequest;
+import xyz.zzj.interviewBank_zzj.model.dto.questionBankQuestion.*;
 import xyz.zzj.interviewBank_zzj.model.entity.QuestionBankQuestion;
 import xyz.zzj.interviewBank_zzj.model.entity.User;
 import xyz.zzj.interviewBank_zzj.model.vo.QuestionBankQuestionVO;
@@ -27,6 +26,7 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
+import java.util.List;
 
 /**
  * 题库题目关联接口
@@ -54,7 +54,7 @@ public class QuestionBankQuestionController {
      * @return
      */
     @PostMapping("/add")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Long> addQuestionBankQuestion(@RequestBody QuestionBankQuestionAddRequest questionBankQuestionAddRequest, HttpServletRequest request) {
         ThrowUtils.throwIf(questionBankQuestionAddRequest == null, ErrorCode.PARAMS_ERROR);
         // todo 在此处将实体类和 DTO 进行转换
@@ -80,7 +80,7 @@ public class QuestionBankQuestionController {
      * @return
      */
     @PostMapping("/delete")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> deleteQuestionBankQuestion(@RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
         if (deleteRequest == null || deleteRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -107,7 +107,7 @@ public class QuestionBankQuestionController {
      * @return
      */
     @PostMapping("/update")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> updateQuestionBankQuestion(@RequestBody QuestionBankQuestionUpdateRequest questionBankQuestionUpdateRequest) {
         if (questionBankQuestionUpdateRequest == null || questionBankQuestionUpdateRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -150,7 +150,7 @@ public class QuestionBankQuestionController {
      * @return
      */
     @PostMapping("/list/page")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Page<QuestionBankQuestion>> listQuestionBankQuestionByPage(@RequestBody QuestionBankQuestionQueryRequest questionBankQuestionQueryRequest) {
         long current = questionBankQuestionQueryRequest.getCurrent();
         long size = questionBankQuestionQueryRequest.getPageSize();
@@ -235,5 +235,48 @@ public class QuestionBankQuestionController {
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(true);
     }
+
+    /**
+     * 批量添加题库题目关联（管理员可用）
+     * @param questionBatchAddRequest 批量添加题库题目关联的请求
+     * @param request 请求
+     * @return 成功返回 true
+     */
+    @PostMapping("/add/batch")
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> batchAddQuestionBankQuestion(@RequestBody QuestionBankQuestionBatchAddRequest questionBatchAddRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(questionBatchAddRequest == null, ErrorCode.PARAMS_ERROR);
+        // 取出参数
+        User loginUser = userService.getLoginUser(request);
+        //题目列表
+        List<Long> questionIdList = questionBatchAddRequest.getQuestionId();
+        //题库id
+        Long questionBankId = questionBatchAddRequest.getQuestionBankId();
+        ThrowUtils.throwIf(CollUtil.isEmpty(questionIdList) || questionBankId == null, ErrorCode.PARAMS_ERROR, "参数错误");
+        questionBankQuestionService.batchAddQuestionBankQuestion(questionIdList, questionBankId, loginUser);
+        return ResultUtils.success(true);
+    }
+
+    /**
+     * 批量移除题库题目关联（管理员可用）
+     * @param batchRemoveRequest 批量移除题库题目关联的请求
+     * @return 成功返回 true
+     */
+    @PostMapping("/remove/batch")
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> batchRemoveQuestionBankQuestion(@RequestBody QuestionBankQuestionBatchRemoveRequest batchRemoveRequest) {
+        //参数校验
+        ThrowUtils.throwIf(batchRemoveRequest == null, ErrorCode.PARAMS_ERROR);
+        // 取出参数
+        //题目列表
+        List<Long> questionIdList = batchRemoveRequest.getQuestionId();
+        //题库id
+        Long questionBankId = batchRemoveRequest.getQuestionBankId();
+        ThrowUtils.throwIf(CollUtil.isEmpty(questionIdList) || questionBankId == null, ErrorCode.PARAMS_ERROR, "参数错误");
+        questionBankQuestionService.batchRemoveQuestionBankQuestion(questionIdList, questionBankId);
+        return ResultUtils.success(true);
+    }
+
+
     // endregion
 }

@@ -13,6 +13,7 @@ import xyz.zzj.interviewBank_zzj.model.entity.QuestionBankQuestion;
 import xyz.zzj.interviewBank_zzj.model.vo.QuestionVO;
 
 import javax.servlet.http.HttpServletRequest;
+import java.util.List;
 
 /**
  * 题目服务
@@ -63,4 +64,17 @@ public interface QuestionService extends IService<Question> {
      */
     Page<Question> listQuestionByPage(QuestionQueryRequest questionQueryRequest);
 
+    /**
+     * 从ES中搜索题目
+     *
+     * @param questionQueryRequest
+     * @return
+     */
+    Page<Question> searchFromEs(QuestionQueryRequest questionQueryRequest);
+
+    /**
+     * 批量删除题目 (逻辑删除)
+     * @param questionIds 题目id列表
+     */
+    void batchDeleteQuestion(List<Long> questionIds);
 }

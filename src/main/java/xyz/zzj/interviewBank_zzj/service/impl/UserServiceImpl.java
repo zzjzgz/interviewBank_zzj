@@ -1,22 +1,32 @@
 package xyz.zzj.interviewBank_zzj.service.impl;
 
+import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.collection.CollUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import org.redisson.api.RBitSet;
+import org.redisson.api.RedissonClient;
 import xyz.zzj.interviewBank_zzj.common.ErrorCode;
 import xyz.zzj.interviewBank_zzj.constant.CommonConstant;
+import xyz.zzj.interviewBank_zzj.constant.RedisConstant;
 import xyz.zzj.interviewBank_zzj.exception.BusinessException;
 import xyz.zzj.interviewBank_zzj.mapper.UserMapper;
+import xyz.zzj.interviewBank_zzj.mapper.UserSignMapper;
 import xyz.zzj.interviewBank_zzj.model.dto.user.UserQueryRequest;
 import xyz.zzj.interviewBank_zzj.model.entity.User;
+import xyz.zzj.interviewBank_zzj.model.entity.UserSign;
 import xyz.zzj.interviewBank_zzj.model.enums.UserRoleEnum;
 import xyz.zzj.interviewBank_zzj.model.vo.LoginUserVO;
 import xyz.zzj.interviewBank_zzj.model.vo.UserVO;
+import xyz.zzj.interviewBank_zzj.saToken.DeviceUtils;
 import xyz.zzj.interviewBank_zzj.service.UserService;
 import xyz.zzj.interviewBank_zzj.utils.SqlUtils;
-import java.util.ArrayList;
-import java.util.List;
+
+import java.time.LocalDate;
+import java.time.Year;
+import java.util.*;
 import java.util.stream.Collectors;
+import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import me.chanjar.weixin.common.bean.WxOAuth2UserInfo;
@@ -25,6 +35,8 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
 import xyz.zzj.interviewBank_zzj.constant.UserConstant;
+
+import static xyz.zzj.interviewBank_zzj.constant.UserConstant.USER_LOGIN_STATE;
 
 /**
  * 用户服务实现
@@ -35,10 +47,18 @@ import xyz.zzj.interviewBank_zzj.constant.UserConstant;
 @Slf4j
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements UserService {
 
+    @Resource
+    private RedissonClient redissonClient;
+
+    @Resource
+    private UserSignMapper userSignMapper;
+
     /**
      * 盐值，混淆密码
      */
     public static final String SALT = "zzjny";
+
+
 
     @Override
     public long userRegister(String userAccount, String userPassword, String checkPassword) {
@@ -102,8 +122,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             log.info("user login failed, userAccount cannot match userPassword");
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户不存在或密码错误");
         }
-        // 3. 记录用户的登录态
-        request.getSession().setAttribute(UserConstant.USER_LOGIN_STATE, user);
+        // 3. 记录用户的登录态,并指定设备
+        StpUtil.login(user.getId(), DeviceUtils.getRequestDevice(request));
+        //记录登录态
+        StpUtil.getSession().set(USER_LOGIN_STATE, user);
         return this.getLoginUserVO(user);
     }
 
@@ -134,7 +156,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                 }
             }
             // 记录用户的登录态
-            request.getSession().setAttribute(UserConstant.USER_LOGIN_STATE, user);
+            request.getSession().setAttribute(USER_LOGIN_STATE, user);
             return getLoginUserVO(user);
         }
     }
@@ -148,14 +170,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     @Override
     public User getLoginUser(HttpServletRequest request) {
         // 先判断是否已登录
-        Object userObj = request.getSession().getAttribute(UserConstant.USER_LOGIN_STATE);
-        User currentUser = (User) userObj;
-        if (currentUser == null || currentUser.getId() == null) {
+        Object loginIdD = StpUtil.getLoginIdDefaultNull();
+        if (loginIdD == null) {
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
         // 从数据库查询（追求性能的话可以注释，直接走缓存）
-        long userId = currentUser.getId();
-        currentUser = this.getById(userId);
+        User currentUser = this.getById((String)loginIdD);
         if (currentUser == null) {
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
@@ -171,11 +191,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     @Override
     public User getLoginUserPermitNull(HttpServletRequest request) {
         // 先判断是否已登录
-        Object userObj = request.getSession().getAttribute(UserConstant.USER_LOGIN_STATE);
-        User currentUser = (User) userObj;
-        if (currentUser == null || currentUser.getId() == null) {
-            return null;
+        Object loginIdDefaultNull = StpUtil.getLoginIdDefaultNull();
+        if (loginIdDefaultNull == null) {
+            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
+        User currentUser = new User();
         // 从数据库查询（追求性能的话可以注释，直接走缓存）
         long userId = currentUser.getId();
         return this.getById(userId);
@@ -190,7 +210,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     @Override
     public boolean isAdmin(HttpServletRequest request) {
         // 仅管理员可查询
-        Object userObj = request.getSession().getAttribute(UserConstant.USER_LOGIN_STATE);
+        Object userObj = StpUtil.getSession().get(USER_LOGIN_STATE);
         User user = (User) userObj;
         return isAdmin(user);
     }
@@ -207,11 +227,19 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
      */
     @Override
     public boolean userLogout(HttpServletRequest request) {
-        if (request.getSession().getAttribute(UserConstant.USER_LOGIN_STATE) == null) {
-            throw new BusinessException(ErrorCode.OPERATION_ERROR, "未登录");
-        }
-        // 移除登录态
-        request.getSession().removeAttribute(UserConstant.USER_LOGIN_STATE);
+
+        StpUtil.checkLogin();
+
+        //移除用户当前登录设备的登录态
+        Object loginId = StpUtil.getLoginIdDefaultNull();
+        String loginDevice = StpUtil.getLoginDevice();
+        StpUtil.logout(loginId, loginDevice);
+
+//        if (request.getSession().getAttribute(USER_LOGIN_STATE) == null) {
+//            throw new BusinessException(ErrorCode.OPERATION_ERROR, "未登录");
+//        }
+//        // 移除登录态
+//        request.getSession().removeAttribute(USER_LOGIN_STATE);
         return true;
     }
 
@@ -266,5 +294,71 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         queryWrapper.orderBy(SqlUtils.validSortField(sortField), sortOrder.equals(CommonConstant.SORT_ORDER_ASC),
                 sortField);
         return queryWrapper;
+    }
+
+
+    /**
+     * 增加用户签到记录
+     * @param userId 用户id
+     * @return true 成功 false 失败
+     */
+    @Override
+    public boolean addUserSign(long userId) {
+        // 获取当前日期
+        LocalDate date = LocalDate.now();
+        // 拼接签到记录的key
+        String key = RedisConstant.getUserSignKey(date.getYear(), userId);
+        // 获取redis中的bitset
+        RBitSet bitSet = redissonClient.getBitSet(key);
+        //获取当前日期的第几天，从1开始
+        int dayOfYear = date.getDayOfYear();
+        if(!bitSet.get(dayOfYear)){
+            //当天未签到
+            bitSet.set(dayOfYear,true);
+        }
+        // 当天已签到
+        return true;
+    }
+
+    @Override
+    public List<Integer> selectSignRecord(long userId, Integer year) {
+        if (year == null) {
+            year = LocalDate.now().getYear();
+        }
+        int currentYear = LocalDate.now().getYear();
+        if (year != currentYear) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "年份不是当前年份");
+        }
+
+//        //数据库查询签到记录
+//        QueryWrapper<UserSign> queryWrapper = new QueryWrapper<>();
+//        queryWrapper.eq("userId", userId);
+//        queryWrapper.select("signDay");
+//        List<Integer> result = userSignMapper.selectObjs(queryWrapper)
+//                .stream()
+//                .filter(Objects::nonNull) // 确保过滤掉可能的 null 值
+//                .map(item -> Integer.parseInt(item.toString())) // 转换为 Integer
+//                .collect(Collectors.toList());
+
+
+        //使用redis查询签到记录
+        // 拼接签到记录的key
+        String key = RedisConstant.getUserSignKey(year, userId);
+        // 获取redis中的bitset
+        RBitSet bitSet = redissonClient.getBitSet(key);
+        // 获取bitset中的所有值
+        BitSet signInBitSet = bitSet.asBitSet();
+        // 构造返回结果，保证返回值有序
+        List<Integer> result = new ArrayList<>();
+
+        // 获取当前bitset中已签到的天数
+        // 从第一个被设置为1的位置开始遍历，直到没有被设置为1的位置
+        int index = signInBitSet.nextSetBit(0);
+        while (index >= 0) {
+            result.add(index);
+            // 获取下一个被设置为1的位置
+            index = signInBitSet.nextSetBit(index + 1);
+        }
+        return result;
     }
 }

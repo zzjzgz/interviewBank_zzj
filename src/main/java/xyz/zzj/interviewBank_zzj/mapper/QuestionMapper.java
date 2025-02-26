@@ -1,7 +1,11 @@
 package xyz.zzj.interviewBank_zzj.mapper;
 
+import org.apache.ibatis.annotations.Select;
 import xyz.zzj.interviewBank_zzj.model.entity.Question;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+
+import java.util.Date;
+import java.util.List;
 
 /**
 * @author zengz
@@ -10,6 +14,9 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 * @Entity xyz.zzj.interviewBank_zzj.model.entity.Question
 */
 public interface QuestionMapper extends BaseMapper<Question> {
+
+    @Select("SELECT * FROM question WHERE  updateTime >= #{fiveMinutesAgoDate}")
+    List<Question> listQuestionWithDelete(Date fiveMinutesAgoDate);
 
 }
 

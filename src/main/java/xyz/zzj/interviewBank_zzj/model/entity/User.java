@@ -18,6 +18,7 @@ import lombok.Data;
 @Data
 public class User implements Serializable {
 
+    private static final long serialVersionUID = -5001699497112727762L;
     /**
      * id
      */
@@ -84,7 +85,4 @@ public class User implements Serializable {
      */
     @TableLogic
     private Integer isDelete;
-
-    @TableField(exist = false)
-    private static final long serialVersionUID = 1L;
 }
